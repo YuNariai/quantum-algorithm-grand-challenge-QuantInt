@@ -4,7 +4,7 @@ import traceback
 
 from typing import Optional
 
-from ADAPT_VQE import RunAlgorithm
+from answer import RunAlgorithm
 
 num_exec = 1
 ref_value = -4  #: reference value of 8 qubits
