@@ -8,13 +8,19 @@ from openfermion.utils import load_operator, hermitian_conjugated
 from openfermion.ops.operators.fermion_operator import FermionOperator
 from quri_parts.algo.optimizer import Adam
 from quri_parts.circuit import QuantumGate, UnboundParametricQuantumCircuit
-from quri_parts.core.estimator import ConcurrentParametricQuantumEstimator
+from quri_parts.core.estimator import ConcurrentParametricQuantumEstimator, create_parametric_estimator
 from quri_parts.core.estimator.gradient import parameter_shift_gradient_estimates
 from quri_parts.core.measurement import bitwise_commuting_pauli_measurement
 from quri_parts.core.operator import Operator, SinglePauli, PauliLabel, PAULI_IDENTITY
 from quri_parts.core.sampling.shots_allocator import create_equipartition_shots_allocator
 from quri_parts.core.state import ComputationalBasisState, ParametricCircuitQuantumState
 from quri_parts.openfermion.operator import operator_from_openfermion_op
+from quri_parts.algo.mitigation.zne import (
+    create_zne_estimator,
+    create_folding_left,
+    create_polynomial_extrapolate,
+)
+from quri_parts.algo.mitigation.readout_mitigation import create_filter_matrix
 
 sys.path.append("../")
 from utils.challenge_2023 import ChallengeSampling, TimeExceededError
@@ -186,13 +192,33 @@ class ADAPT_VQE:
         n_shots = self.combined_operators_len[index]
         if qc_type == "sc":
             n_shots *= 100
-        op_grad_estimator = challenge_sampling.create_parametric_sampling_estimator(
+        op_grad_estimator = challenge_sampling.create_sampling_estimator(
             n_shots, self.measurement_factory, self.shots_allocator, qc_type
         )
-        est_value = op_grad_estimator(
-            self.combined_operators[index], self.parametric_state, self.params
-        )
-        return 2 * est_value.value.real
+        '''
+        Add ZNE here.
+        '''
+        #partial_op_grad_estimator = partial(op_grad_estimator,
+        #                                    params=self.params)
+        # choose an extrapolation method
+        extrapolate_method = create_polynomial_extrapolate(order=2)
+        # choose how folding your circuit
+        folding_method = create_folding_left()
+        # define scale factors
+        scale_factors = [1, 3, 5]
+
+        # construct estimator by using zne (only concurrent estimator can be used)
+        zne_estimator = create_zne_estimator(
+            op_grad_estimator, scale_factors, extrapolate_method,
+            folding_method)
+        # by using this estimator, you can obtain an estimated value with ZNE
+        zne_parametric_estimator = create_parametric_estimator(zne_estimator)
+        zne_estimated_value = zne_parametric_estimator(
+            self.combined_operators[index],
+            self.parametric_state,
+            self.params)
+        return 2 * zne_estimated_value.value.real
+
 
     def select_operator(self, qc_type) -> Operator:
         selected_gradient_abs = 0
