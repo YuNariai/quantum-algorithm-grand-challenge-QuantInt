@@ -1,5 +1,7 @@
+# readout for operator + ZNE for g_fn
 import sys
 from typing import Any, Sequence
+from collections import Counter
 
 import numpy as np
 from openfermion import QubitOperator
@@ -9,6 +11,7 @@ from openfermion.ops.operators.fermion_operator import FermionOperator
 from quri_parts.algo.optimizer import Adam
 from quri_parts.circuit import QuantumGate, UnboundParametricQuantumCircuit
 from quri_parts.core.estimator import ConcurrentParametricQuantumEstimator, create_parametric_estimator
+from quri_parts.core.estimator.sampling import sampling_estimate
 from quri_parts.core.estimator.gradient import parameter_shift_gradient_estimates
 from quri_parts.core.measurement import bitwise_commuting_pauli_measurement
 from quri_parts.core.operator import Operator, SinglePauli, PauliLabel, PAULI_IDENTITY
@@ -19,14 +22,24 @@ from quri_parts.algo.mitigation.zne import (
     create_zne_estimator,
     create_folding_left,
     create_polynomial_extrapolate,
+    create_exp_extrapolate,
 )
-from quri_parts.algo.mitigation.readout_mitigation import create_filter_matrix
+from quri_parts.algo.mitigation.readout_mitigation import (
+    create_filter_matrix,
+    create_readout_mitigation_concurrent_sampler,
+    create_readout_mitigation_sampler,
+    readout_mitigation,
+)
 
 sys.path.append("../")
 from utils.challenge_2023 import ChallengeSampling, TimeExceededError
 
 challenge_sampling = ChallengeSampling(noise=True)
 
+#concurernt_sampler_sc = challenge_sampling.create_concurrent_sampler("sc")
+#concurernt_sampler_it = challenge_sampling.create_concurrent_sampler("it")
+#filter_matrix_sc = create_filter_matrix(4, concurernt_sampler_sc, shots=10000)
+#filter_matrix_it = create_filter_matrix(4, concurernt_sampler_it, shots=1000)
 
 class ADAPT_VQE:
     def __init__(self, hamiltonian: Operator, n_qubits):
@@ -41,6 +54,8 @@ class ADAPT_VQE:
         self.ansatz_circuit: UnboundParametricQuantumCircuit = None
         self.hf_gates: Sequence[QuantumGate] = None
         self.sampling_estimator: ConcurrentParametricQuantumEstimator[ParametricCircuitQuantumState] = None
+        self.estimator_for_gn = None
+        self.estimator_for_cost = None
         self.hamiltonian = hamiltonian
         self.n_qubits = n_qubits
         self.optimizer: Adam = None
@@ -158,6 +173,74 @@ class ADAPT_VQE:
                     qubitPool.append(qubitOp)
 
         self.qubit_pool = [operator_from_openfermion_op(qubitOp) for qubitOp in qubitPool]
+        
+    '''
+    helper function for read out mitigation
+    
+    def create_read_out_estimator(self, qc_type, n_shots, measurement_factory, shots_allocator):
+        # this estrimator works with parametric state
+        #filter_matrix = self.make_filter_matrix(qc_type)
+        #self.update_filter_matrix(qc_type)
+        def create_readout_sampler():
+            def readout_sampler(circuit_and_shots):
+                # circuit_and_shots = [(circuit,shots)]
+                #counts = concurernt_sampler(circuit,shots,qc_type)
+                (circuit,shots)=circuit_and_shots[0]
+                count = [challenge_sampling.sampler(circuit,shots,qc_type)]
+                
+                if qc_type == 'sc':
+                    count_readout = readout_mitigation(count, filter_matrix_sc)
+                    
+                    if next(count_readout):
+                        return count_readout
+                    else:
+                        return count[0]
+                if qc_type == 'it':
+                    count_readout = readout_mitigation(count, filter_matrix_it)
+                    if next(count_readout):
+                        return count_readout
+                    else:
+                        return count[0]
+                
+            return readout_sampler
+        readout_concurrent_sampler = create_readout_sampler()
+        
+        def read_out_estimator(op, state):
+            readout_eval=sampling_estimate(
+                op, 
+                state, 
+                n_shots, 
+                readout_concurrent_sampler, 
+                measurement_factory, 
+                shots_allocator
+            )
+            return readout_eval
+            
+        return read_out_estimator
+    
+    def create_concurrent_readout_estimator(self, qc_type, n_shots, measurement_factory, shots_allocator):
+        estimator = self.create_read_out_estimator(qc_type, n_shots, measurement_factory, shots_allocator)
+        def concurrent_readout_estimator(operator,state):            
+            return [estimator(operator,state)]
+        return concurrent_readout_estimator
+    
+    def create_concurrent_para_readout_estimator(self, qc_type, n_shots, measurement_factory, shots_allocator):
+        estimator = self.create_read_out_estimator(qc_type, n_shots, measurement_factory, shots_allocator)
+        def concurrent_para_readout_estimator(operator,state,params):
+            bind_states = [state.bind_parameters(param) for param in params]
+            operators = [operator] * len(bind_states)
+            return [
+                estimator(
+                    op,
+                    state
+                )
+                for op, state in zip(operators, bind_states)
+            ]
+        return concurrent_para_readout_estimator
+        
+    haven't finished
+    end helper function for read out mitigation
+    '''
 
     def prepare(self):
         initial_bits = 0b00000000
@@ -180,45 +263,52 @@ class ADAPT_VQE:
         measurements = [m for m in measurements if m.pauli_set != {PAULI_IDENTITY}]
         pauli_sets = tuple(m.pauli_set for m in measurements)
         self.sampling_estimator = challenge_sampling.create_concurrent_parametric_sampling_estimator(
-            len(pauli_sets) * 12, self.measurement_factory,
+            len(pauli_sets) * 12 , self.measurement_factory,
             self.shots_allocator, "it"
         )
+        '''
+        self.estimator_for_gn = self.create_concurrent_readout_estimator("it",
+            len(pauli_sets) * 12, self.measurement_factory,
+            self.shots_allocator
+        )
+        self.estimator_for_cost = self.create_concurrent_para_readout_estimator("it",
+            len(pauli_sets) * 12, self.measurement_factory,
+            self.shots_allocator
+        )
+        '''
         self.params = []
         self.construct_parametric_circuit()
         self.parametric_state = ParametricCircuitQuantumState(self.n_qubits, self.ansatz_circuit)
         self.optimizer = Adam()
+        
+    
 
     def get_operator_gradient(self, index, qc_type):
         n_shots = self.combined_operators_len[index]
         if qc_type == "sc":
             n_shots *= 100
-        op_grad_estimator = challenge_sampling.create_sampling_estimator(
-            n_shots, self.measurement_factory, self.shots_allocator, qc_type
+        
+        op_grad_readout_estimator = challenge_sampling.create_read_out_estimator(
+            n_shots, self.measurement_factory, self.shots_allocator,qc_type
         )
-        '''
-        Add ZNE here.
-        '''
-        #partial_op_grad_estimator = partial(op_grad_estimator,
-        #                                    params=self.params)
-        # choose an extrapolation method
-        extrapolate_method = create_polynomial_extrapolate(order=2)
-        # choose how folding your circuit
-        folding_method = create_folding_left()
-        # define scale factors
-        scale_factors = [1, 3, 5]
-
-        # construct estimator by using zne (only concurrent estimator can be used)
-        zne_estimator = create_zne_estimator(
-            op_grad_estimator, scale_factors, extrapolate_method,
-            folding_method)
-        # by using this estimator, you can obtain an estimated value with ZNE
-        zne_parametric_estimator = create_parametric_estimator(zne_estimator)
-        zne_estimated_value = zne_parametric_estimator(
+        bind_state = self.parametric_state.bind_parameters(self.params)
+        
+        est_value = op_grad_readout_estimator(
             self.combined_operators[index],
-            self.parametric_state,
-            self.params)
-        return 2 * zne_estimated_value.value.real
+            bind_state)
+        '''
+        op_grad_estimator = challenge_sampling.create_concurrent_sampling_estimator(
+        n_shots,self.measurement_factory,self.shots_allocator,qc_type)
+        
+        readout_concurrent_sampler = create_readout_mitigation_concurrent_sampler(qubit_count=4, sampler=op_grad_estimator, shots=n_shots)
+        
+        bind_state = self.parametric_state.bind_parameters(self.params)
 
+        readout_eval = sampling_estimate(
+            self.combined_operators[index], bind_state, n_shots, readout_concurrent_sampler, self.measurement_factory, self.shots_allocator)
+        '''
+        aa = 2 * est_value.value.real
+        return aa
 
     def select_operator(self, qc_type) -> Operator:
         selected_gradient_abs = 0
@@ -265,9 +355,59 @@ class ADAPT_VQE:
         estimate = self.sampling_estimator(
             self.hamiltonian, self.parametric_state, [param_values]
         )
+        '''
+        extrapolate_method = create_polynomial_extrapolate(order=3)
+        folding_method = create_folding_left()
+        scale_factors = [1, 3, 5, 7, 9]
+        zne_estimator = create_zne_estimator(
+            self.estimator_for_gn, scale_factors, extrapolate_method,
+            folding_method)        
+
+        def zne_parametric_estimator(operator,state,params):
+            bind_states = state.bind_parameters(params[0])
+
+            return [
+                zne_estimator(
+                    operator,
+                    bind_states
+                )
+            ]
+        
+        estimate = zne_parametric_estimator(
+            self.hamiltonian, self.parametric_state, [param_values]
+        )
+        '''
         return estimate[0].value.real
 
     def g_fn(self, param_values):
+        '''
+        # choose an extrapolation method
+        extrapolate_method = create_polynomial_extrapolate(order=3)
+        # choose how folding your circuit
+        folding_method = create_folding_left()
+        # define scale factors
+        scale_factors = [1, 3, 5, 7]
+        # construct estimator by using zne (only concurrent estimator can be used)
+        zne_estimator = create_zne_estimator(
+            self.estimator_for_gn, scale_factors, extrapolate_method,
+            folding_method)
+        
+
+        def zne_parametric_estimator(operator,state,params):
+            bind_states = [state.bind_parameters(param) for param in params]
+            operators = [operator] * len(bind_states)
+            return [
+                zne_estimator(
+                    op,
+                    state
+                )
+                for op, state in zip(operators, bind_states)
+            ]
+        
+        grad = parameter_shift_gradient_estimates(
+            self.hamiltonian, self.parametric_state, param_values, zne_parametric_estimator
+        )
+        '''
         grad = parameter_shift_gradient_estimates(
             self.hamiltonian, self.parametric_state, param_values, self.sampling_estimator
         )
@@ -278,7 +418,7 @@ class ADAPT_VQE:
         while True:
             try:
                 print(f"STEP 1: {challenge_sampling.total_quantum_circuit_time}")
-                qc_type = "sc" if n_iter < 2 else "it"
+                qc_type = "sc" if n_iter < 2 else "it"                
                 selected_operator = self.select_operator(qc_type)
                 print(f"STEP 2: {challenge_sampling.total_quantum_circuit_time}")
                 self.ansatz_operators.append(selected_operator)
