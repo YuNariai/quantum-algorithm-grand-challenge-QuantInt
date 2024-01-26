@@ -1,5 +1,7 @@
+# readout
 from collections.abc import Collection, Iterable
-from typing import Mapping, Sequence, Union
+from collections import Counter
+from typing import Mapping, Sequence, Union, cast
 
 from qiskit.circuit import QuantumCircuit as QiskitQuantumCircuit
 from qiskit.opflow import PauliOp, PauliSumOp
@@ -42,6 +44,8 @@ from quri_parts.qulacs.sampler import (
     create_qulacs_vector_concurrent_sampler,
 )
 
+from quri_parts.algo.mitigation.readout_mitigation import create_filter_matrix, readout_mitigation
+
 from utils.challenge_transpiler import (
     SCSquareLatticeTranspiler,
     quri_parts_iontrap_native_circuit,
@@ -49,7 +53,7 @@ from utils.challenge_transpiler import (
 from utils.sampling_estimator import sampling_estimate_gc
 from time import time
 
-max_qc_time = 1000
+max_qc_time = 600000
 max_run_time = 6 * 10 ** 5
 QPQiskitCircuit = Union[NonParametricQuantumCircuit, QiskitQuantumCircuit]
 QPQiskitOperator = Union[Operator, Union[PauliSumOp, PauliOp]]
@@ -66,12 +70,16 @@ class ChallengeSampling:
         self.gate_time: float = 0
         self.initializing_time: float = 0
         self.init_time: float = time()
+        self.filter_matrix_sc = None
+        self.filter_matrix_it = None
+        self.circuit = None
 
     def sampler(
         self,
         circuit: QPQiskitCircuit,
         n_shots: int,
         hardware_type: str,
+        readout:bool = False
     ) -> Iterable[Mapping[int, Union[int, float]]]:
         """Sampling by using a given circuit with a given number of shots and hartware type.
 
@@ -83,21 +91,56 @@ class ChallengeSampling:
         Returns:
             Counts of sampling.
         """
+        tot_gate_time = 0
+        tot_initializing_time = 0
+        
         if isinstance(circuit, QiskitQuantumCircuit):
             circuit = circuit_from_qiskit(circuit)
-
         noise_model, transpiled_circuit = self._noise_model_with_transpiled_circuit(
             circuit, hardware_type
         )
         concurrent_sampler = self._concurrent_sampler(noise_model)
+        
+        if hardware_type == "sc":
+            counts = concurrent_sampler([(transpiled_circuit, n_shots)])
+            if readout:
+                '''
+                q_num = transpiled_circuit.qubit_count
+                if q_num not in self.filter_matrix_sc:
+                    self.filter_matrix_sc[q_num] = create_filter_matrix(q_num, concurrent_sampler, shots=10000)
+                '''
+                if self.filter_matrix_sc is None:
+                    self.filter_matrix_sc = create_filter_matrix(8, concurrent_sampler, shots=10000)
+                    tot_gate_time += 2**8 * self.gate_time * 10000
+                    tot_initializing_time += 2**8 * self.initializing_time * 10000
+                #count_readout = next(readout_mitigation(counts, self.filter_matrix_sc[q_num]))
+                count_readout = next(readout_mitigation(counts, self.filter_matrix_sc))
+                counts = [Counter(count_readout)]
+                
+        
         if hardware_type == "it":
             transpiled_circuit = quri_parts_iontrap_native_circuit(transpiled_circuit)
-        counts = concurrent_sampler([(transpiled_circuit, n_shots)])[0]
-
+            counts = concurrent_sampler([(transpiled_circuit, n_shots)])
+            if readout:
+                '''
+                q_num = transpiled_circuit.qubit_count
+                if q_num not in self.filter_matrix_it:
+                    self.filter_matrix_it[q_num] = create_filter_matrix(q_num, concurrent_sampler, shots=1000)
+                '''
+                if self.filter_matrix_it is None:
+                    self.filter_matrix_it = create_filter_matrix(8, concurrent_sampler, shots=1000)
+                
+                    tot_gate_time += 2**8 * self.gate_time * 1000
+                    tot_initializing_time += 2**8 * self.initializing_time * 1000
+                #count_readout = next(readout_mitigation(counts, self.filter_matrix_it[q_num]))
+                count_readout = next(readout_mitigation(counts, self.filter_matrix_it))
+                counts = [Counter(count_readout)]
+            
+            
         self.total_jobs += 1
         self.total_shots += n_shots
-        tot_gate_time = transpiled_circuit.depth * self.gate_time * n_shots
-        tot_initializing_time = self.initializing_time * n_shots
+        tot_gate_time += transpiled_circuit.depth * self.gate_time * n_shots
+        tot_initializing_time += self.initializing_time * n_shots
         tot_time = tot_gate_time + tot_initializing_time
         self.total_quantum_circuit_time += tot_time
 
@@ -106,7 +149,7 @@ class ChallengeSampling:
         if self.total_quantum_circuit_time > max_qc_time or run_time > max_run_time:
             raise TimeExceededError(self.total_quantum_circuit_time, run_time)
 
-        return counts
+        return counts[0]
 
     def create_sampler(self, hardware_type: str) -> Sampler:
         """Returns a :class:`~Sampler`."""
@@ -187,11 +230,11 @@ class ChallengeSampling:
             shots_allocator=shots_allocator,
         )
         if len(operator) == 0:
-            return estimated_value.value.real
+            return estimated_value
 
         if PAULI_IDENTITY in operator:
             if len(operator) == 1:
-                return estimated_value.value.real
+                return estimated_value
 
         self.total_jobs += 1
         self.total_shots += n_shots
@@ -209,6 +252,131 @@ class ChallengeSampling:
             raise TimeExceededError(self.total_quantum_circuit_time, run_time)
 
         return estimated_value
+    
+    '''
+    helper function for read out mitigation
+    '''
+    def create_concurrent_readout_sampler(self,qc_type): 
+        def readout_sampler(circuit_and_shots):
+            # circuit_and_shots = (circuit,shots)
+            # counts = concurernt_sampler(circuit,shots,qc_type)
+            (circuit,shots)=circuit_and_shots
+            count = self.sampler(circuit,shots,qc_type,True) 
+            #if qc_type == 'sc':
+            #    count_readout = next(readout_mitigation(count, self.filter_matrix_sc))
+                
+                #if not count_readout:
+                #    return count[0]
+                #else:
+                #    return Counter(count_readout)
+                #return Counter(count_readout)
+            #if qc_type == 'it':
+            #    count_readout = next(readout_mitigation(count, self.filter_matrix_it))
+                #if not count_readout:
+                #    return count[0]
+                #else:
+                #    return Counter(count_readout)
+                
+                #return Counter(count_readout)
+            return count
+                
+        def sampling(shot_circuit_pairs: Iterable[tuple[QPQiskitCircuit, int]]):
+            counts = []
+            for circuit_and_shots in shot_circuit_pairs:
+                counts.append(readout_sampler(circuit_and_shots))
+            return counts
+        return sampling
+        
+    def readout_sampling_estimator(
+        self,
+        operator,
+        state,
+        n_shots: int,
+        measurement_factory,
+        shots_allocator,
+        hardware_type,
+    ):
+        
+        
+        readout_concurrent_sampler = self.create_concurrent_readout_sampler(hardware_type)
+
+
+        estimated_value, circuit_and_shots = sampling_estimate_gc(
+            op=operator,
+            state=state,
+            total_shots=n_shots,
+            sampler=readout_concurrent_sampler,
+            hardware_type=hardware_type,
+            measurement_factory=measurement_factory,
+            shots_allocator=shots_allocator,
+        )
+        if len(operator) == 0:
+            return estimated_value
+
+        if PAULI_IDENTITY in operator:
+            if len(operator) == 1:
+                return estimated_value
+        '''
+        self.total_jobs += 1
+        self.total_shots += n_shots
+        tot_gate_time, tot_initializing_time = 0.0, 0.0
+        for circuit_shots in circuit_and_shots:
+            circuit_depth = self.transpiler(circuit_shots[0]).depth
+            tot_gate_time += float(self.gate_time * circuit_depth * circuit_shots[1])
+            tot_initializing_time += self.initializing_time * circuit_shots[1]
+        tot_time = tot_gate_time + tot_initializing_time
+        self.total_quantum_circuit_time += tot_time
+
+        now_time = time()
+        run_time = now_time - self.init_time
+        if self.total_quantum_circuit_time > max_qc_time or run_time > max_run_time:
+            raise TimeExceededError(self.total_quantum_circuit_time, run_time)
+        '''
+        return estimated_value
+
+    
+    def create_read_out_estimator(self, n_shots, measurement_factory, shots_allocator, qc_type):
+                           
+        def sampling_estimate(operators, states):
+            estimator = self.readout_sampling_estimator(
+                operators,
+                states,
+                n_shots,
+                measurement_factory,
+                shots_allocator,
+                qc_type,
+            )
+            return estimator
+
+        return sampling_estimate
+        
+    '''
+    def create_concurrent_readout_estimator(self, qc_type, n_shots, measurement_factory, shots_allocator):
+        estimator = self.create_read_out_estimator(qc_type, n_shots, measurement_factory, shots_allocator)
+        def concurrent_readout_estimator(operator,state):            
+            return [estimator(operator,state)]
+        return concurrent_readout_estimator
+    
+    def create_concurrent_para_readout_estimator(self, qc_type, n_shots, measurement_factory, shots_allocator):
+        estimator = self.create_read_out_estimator(qc_type, n_shots, measurement_factory, shots_allocator)
+        def concurrent_para_readout_estimator(operator,state,params):
+            bind_states = [state.bind_parameters(param) for param in params]
+            operators = [operator] * len(bind_states)
+            return [
+                estimator(
+                    op,
+                    state
+                )
+                for op, state in zip(operators, bind_states)
+            ]
+        return concurrent_para_readout_estimator
+    '''
+    '''    
+    haven't finished
+    end helper function for read out mitigation
+    '''
+    
+
 
     def concurrent_sampling_estimator(
         self,
