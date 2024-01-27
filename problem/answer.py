@@ -263,7 +263,7 @@ class ADAPT_VQE:
         measurements = [m for m in measurements if m.pauli_set != {PAULI_IDENTITY}]
         pauli_sets = tuple(m.pauli_set for m in measurements)
         self.sampling_estimator = challenge_sampling.create_concurrent_parametric_sampling_estimator(
-            len(pauli_sets) * 12 , self.measurement_factory,
+            len(pauli_sets) * 12 * 120, self.measurement_factory,
             self.shots_allocator, "it"
         )
         '''
@@ -272,7 +272,7 @@ class ADAPT_VQE:
             self.shots_allocator
         )
         self.estimator_for_cost = self.create_concurrent_para_readout_estimator("it",
-            len(pauli_sets) * 12, self.measurement_factory,
+            len(pauli_sets) * 12 * 120, self.measurement_factory,
             self.shots_allocator
         )
         '''
