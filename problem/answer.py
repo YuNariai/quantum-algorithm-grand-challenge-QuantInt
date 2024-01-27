@@ -268,7 +268,7 @@ class ADAPT_VQE:
         )
         '''
         self.estimator_for_gn = self.create_concurrent_readout_estimator("it",
-            len(pauli_sets) * 12, self.measurement_factory,
+            len(pauli_sets) * 12 * 120, self.measurement_factory,
             self.shots_allocator
         )
         self.estimator_for_cost = self.create_concurrent_para_readout_estimator("it",
@@ -284,7 +284,7 @@ class ADAPT_VQE:
     
 
     def get_operator_gradient(self, index, qc_type):
-        n_shots = self.combined_operators_len[index]
+        n_shots = self.combined_operators_len[index]*120
         if qc_type == "sc":
             n_shots *= 100
         
