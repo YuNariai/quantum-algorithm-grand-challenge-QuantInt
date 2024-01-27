@@ -128,10 +128,10 @@ class ChallengeSampling:
                     self.filter_matrix_it[q_num] = create_filter_matrix(q_num, concurrent_sampler, shots=1000)
                 '''
                 if self.filter_matrix_it is None:
-                    self.filter_matrix_it = create_filter_matrix(8, concurrent_sampler, shots=1000)
+                    self.filter_matrix_it = create_filter_matrix(8, concurrent_sampler, shots=10000)
                 
-                    tot_gate_time += 2**8 * self.gate_time * 1000
-                    tot_initializing_time += 2**8 * self.initializing_time * 1000
+                    tot_gate_time += 2**8 * self.gate_time * 10000
+                    tot_initializing_time += 2**8 * self.initializing_time * 10000
                 #count_readout = next(readout_mitigation(counts, self.filter_matrix_it[q_num]))
                 count_readout = next(readout_mitigation(counts, self.filter_matrix_it))
                 counts = [Counter(count_readout)]
