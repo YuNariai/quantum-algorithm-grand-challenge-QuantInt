@@ -20,8 +20,8 @@ from quri_parts.openfermion.operator import operator_from_openfermion_op
 sys.path.append("../")
 from utils.challenge_2023 import ChallengeSampling, TimeExceededError
 
-#challenge_sampling = ChallengeSampling(noise=True)
-challenge_sampling = ChallengeSampling(noise=False)
+challenge_sampling = ChallengeSampling(noise=True)
+#challenge_sampling = ChallengeSampling(noise=False)
 
 class ADAPT_VQE:
     def __init__(self, hamiltonian: Operator, n_qubits):
