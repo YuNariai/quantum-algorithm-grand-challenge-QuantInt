@@ -266,6 +266,10 @@ class ADAPT_VQE:
             len(pauli_sets) * 12 * 120, self.measurement_factory,
             self.shots_allocator, "it"
         )
+        self.estimator_for_gn = challenge_sampling.create_concurrent_sampling_estimator(
+            len(pauli_sets) * 12 * 120, self.measurement_factory,
+            self.shots_allocator, "it"
+        )
         '''
         self.estimator_for_gn = self.create_concurrent_readout_estimator("it",
             len(pauli_sets) * 12 * 120, self.measurement_factory,
@@ -380,13 +384,13 @@ class ADAPT_VQE:
         return estimate[0].value.real
 
     def g_fn(self, param_values):
-        '''
+        
         # choose an extrapolation method
-        extrapolate_method = create_polynomial_extrapolate(order=3)
+        extrapolate_method = create_polynomial_extrapolate(order=2)
         # choose how folding your circuit
         folding_method = create_folding_left()
         # define scale factors
-        scale_factors = [1, 3, 5, 7]
+        scale_factors = [1, 3, 5]
         # construct estimator by using zne (only concurrent estimator can be used)
         zne_estimator = create_zne_estimator(
             self.estimator_for_gn, scale_factors, extrapolate_method,
@@ -411,6 +415,7 @@ class ADAPT_VQE:
         grad = parameter_shift_gradient_estimates(
             self.hamiltonian, self.parametric_state, param_values, self.sampling_estimator
         )
+        '''
         return np.asarray([i.real for i in grad.values])
 
     def run(self):
