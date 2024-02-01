@@ -282,7 +282,7 @@ class ADAPT_VQE:
                         self.ansatz_circuit.add_RX_gate(index, -np.pi / 2)
 
     def cost_fn(self, param_values):
-        
+        '''
         estimate = self.sampling_estimator(
             self.hamiltonian, self.parametric_state, [param_values]
         )
@@ -307,7 +307,7 @@ class ADAPT_VQE:
         estimate = zne_parametric_estimator(
             self.hamiltonian, self.parametric_state, [param_values]
         )
-        '''
+        
         return estimate[0].value.real
 
     def g_fn(self, param_values):
