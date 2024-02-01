@@ -181,11 +181,11 @@ class ADAPT_VQE:
         measurements = [m for m in measurements if m.pauli_set != {PAULI_IDENTITY}]
         pauli_sets = tuple(m.pauli_set for m in measurements)
         self.sampling_estimator = challenge_sampling.create_concurrent_parametric_sampling_estimator(
-            len(pauli_sets) * 12, self.measurement_factory,
+            len(pauli_sets) * 12 *120, self.measurement_factory,
             self.shots_allocator, "it"
         )
-        self.estimator_for_gn = challenge_sampling.create_concurrent_sampling_estimator(
-            len(pauli_sets) * 12, self.measurement_factory,
+        self.estimator_for_gn  = challenge_sampling.create_concurrent_sampling_estimator(
+            len(pauli_sets) * 12 * 120, self.measurement_factory,
             self.shots_allocator, "it"
         )
         self.params = []
@@ -194,7 +194,7 @@ class ADAPT_VQE:
         self.optimizer = Adam()
 
     def get_operator_gradient(self, index, qc_type):
-        n_shots = self.combined_operators_len[index]
+        n_shots = self.combined_operators_len[index]*120
         if qc_type == "sc":
             n_shots *= 100
             
@@ -282,14 +282,14 @@ class ADAPT_VQE:
                         self.ansatz_circuit.add_RX_gate(index, -np.pi / 2)
 
     def cost_fn(self, param_values):
-        '''
+        
         estimate = self.sampling_estimator(
             self.hamiltonian, self.parametric_state, [param_values]
         )
         '''
-        extrapolate_method = create_polynomial_extrapolate(order=1)
+        extrapolate_method = create_polynomial_extrapolate(order=2)
         folding_method = create_folding_left()
-        scale_factors = [1, 3]
+        scale_factors = [1, 3, 5]
         zne_estimator = create_zne_estimator(
             self.estimator_for_gn, scale_factors, extrapolate_method,
             folding_method)        
@@ -307,11 +307,11 @@ class ADAPT_VQE:
         estimate = zne_parametric_estimator(
             self.hamiltonian, self.parametric_state, [param_values]
         )
-        
+        '''
         return estimate[0].value.real
 
     def g_fn(self, param_values):
-        '''
+        
         # choose an extrapolation method
         extrapolate_method = create_polynomial_extrapolate(order=3)
         # choose how folding your circuit
@@ -342,7 +342,7 @@ class ADAPT_VQE:
         grad = parameter_shift_gradient_estimates(
             self.hamiltonian, self.parametric_state, param_values, self.sampling_estimator
         )
-        
+        '''
         return np.asarray([i.real for i in grad.values])
 
     def run(self):
