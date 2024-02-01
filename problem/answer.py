@@ -287,9 +287,9 @@ class ADAPT_VQE:
             self.hamiltonian, self.parametric_state, [param_values]
         )
         '''
-        extrapolate_method = create_polynomial_extrapolate(order=2)
+        extrapolate_method = create_polynomial_extrapolate(order=1)
         folding_method = create_folding_left()
-        scale_factors = [1, 3, 5]
+        scale_factors = [1, 3]
         zne_estimator = create_zne_estimator(
             self.estimator_for_gn, scale_factors, extrapolate_method,
             folding_method)        
